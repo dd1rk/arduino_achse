@@ -16,7 +16,7 @@
 
 #include "defines.h"
 
-#define VERSION "V0.05"
+#define VERSION "V0.06"
 
 // When using the BREAKOUT BOARD only, use these 8 data lines to the LCD:
 // For the Arduino Uno, Duemilanove, Diecimila, etc.:
@@ -154,6 +154,26 @@ void setup(void) {
 
 } /* setup */
 
+/**********************************************************************/
+/*                                                                    */
+/**********************************************************************/
+int updateMaxLoop(void)
+{
+
+#define MAXLOOP_X 265
+#define MAXLOOP_Y 185
+
+  tft.setTextSize(1);
+  tft.setCursor(MAXLOOP_X,MAXLOOP_Y);
+
+  tft.setTextColor(BLUE,BLACK);
+
+  tft.fillRect(MAXLOOP_X,MAXLOOP_Y-5, 46, 20, BLACK);
+
+  tft.print(giMaxLoop);
+
+  return 0;
+} /* updateMaxLoop */
 
 /**********************************************************************/
 /*                                                                    */
@@ -174,8 +194,8 @@ int drawScreen(void)
   strcpy(szText, "Home");
   PlaceButton(x,y,szText,CYAN);
 
-  strcpy(szText, "Fast");
-  PlaceButton(x+BUTTONDIST_X,y,szText,WHITE);
+  strcpy(szText, "Pause");
+  PlaceButton(x+BUTTONDIST_X,y,szText,YELLOW);
 
   strcpy(szText, "Up");
   PlaceButton(x,y+BUTTONDIST_Y,szText,BLUE);
@@ -191,8 +211,11 @@ int drawScreen(void)
 
   strcpy(szText, "Save");
   PlaceButton(x,y+(BUTTONDIST_Y*3),szText,CYAN);
-  strcpy(szText, "Leer2");
-  PlaceButton(x+BUTTONDIST_X,y+(BUTTONDIST_Y*3),szText,WHITE);
+
+  strcpy(szText, "Count");
+  PlaceButton(x+BUTTONDIST_X,y+(BUTTONDIST_Y*3),szText,BLUE);
+
+
  
   tft.setTextSize(2);
   tft.setCursor(100, 220);
@@ -202,8 +225,9 @@ int drawScreen(void)
   tft.setCursor(200, 220);
   tft.print("Cnt:");
 
-  updateSteps();
-  updateStatus(NULL);
+  updateSteps(1);
+  updateMaxLoop();
+  updateStatusLine(NULL);
 
 } /* drawScreen () */
  
@@ -211,18 +235,47 @@ int drawScreen(void)
 /**********************************************************************/
 /*                                                                    */
 /**********************************************************************/
-int updateSteps(void)
+int updateSteps(int iSource)
 {
+  if (iSource) {
+    Serial.print("updateSteps:");
+    Serial.println(iSource);
+  }
+
   tft.setTextSize(2);
   tft.setTextColor(RED,BLACK);
   tft.setCursor(150, 220);
 
   if (giStepCnt < 1000) {
-    tft.fillRect(150,215, 45, 20, BLACK);
+    tft.fillRect(150,215, 46, 20, BLACK);
   }
 
   tft.print(giStepCnt);
 } /* updateSteps */
+
+
+/**********************************************************************/
+/*                                                                    */
+/**********************************************************************/
+int updateTargetPos(void)
+{
+  tft.setTextSize(1);
+
+#define TARGET_X (FIRSTBUTTON_X - 35)
+#define TARGET_Y (FIRSTBUTTON_Y+(BUTTONDIST_Y*3) + 15)
+
+  tft.setTextSize(1);
+  tft.setCursor(TARGET_X,TARGET_Y);
+
+  tft.setTextColor(CYAN,BLACK);
+
+  tft.fillRect(TARGET_X,TARGET_Y-5, 35, 20, BLACK);
+
+  tft.print(giTargetPos);
+
+  return 0;
+
+} /* updateTargetPos */
 
 /**********************************************************************/
 /*                                                                    */
@@ -239,27 +292,39 @@ int updateLoopCnt(void)
   tft.setCursor(245, 220);
 
   tft.print(giLoopCnt);
+
+  return 0;
 } /* updateLoopCnt */
 
 /**********************************************************************/
 /*                                                                    */
 /**********************************************************************/
-int updateStatus(char *szText)
+int updateStatusLine(char *szText)
 {
+#define MAXSTATUSTEXTLENGTH	6
   tft.setTextSize(2);
   tft.setTextColor(WHITE,BLACK);
   tft.setCursor(20, 220);
   //tft.fillRect(20,215, 100, 21, BLACK);
 
   if (szText) { 
+    if (strlen(szText) > MAXSTATUSTEXTLENGTH) {
+      Serial.print("zu lange: _");
+      Serial.println(szText);
+      szText[MAXSTATUSTEXTLENGTH] = '\0';
+      Serial.print("neu: _");
+      Serial.println(szText);
+    }
     tft.print(szText);
   }
-} /* updateStatus */
+} /* updateStatusLine */
 
 
 
 long myTimer = 0;
 long myTimeout = 0;
+long lDownTime = 0;
+#define DOWNDELAY	1000
 
 unsigned char g_ucDir = HIGH;
 unsigned char g_ucMotorRun = 0;
@@ -315,11 +380,10 @@ void loop()
 
       if ((glState != HOMING) && (giStepCnt <= 0)) {
         g_ucMotorRun = 0;
-        updateSteps();
+        updateSteps(2);
       }
       digitalWrite(STEPDIRPIN, g_ucDir);
 
-      //updateSteps();
     }
 
     if (glState == HOMING) {
@@ -331,28 +395,49 @@ void loop()
         g_ucDir = LOW;
         giStepCnt = 0;
         glState = HOME;
-        updateSteps();
+        updateSteps(3);
 
         strcpy(szStatus,"Homed ");
-        updateStatus(szStatus);
+        updateStatusLine(szStatus);
       }
     } else if (glState == RUN) {
       if (giStepCnt <= (giTargetPos - giHubSteps)) {
         //g_ucMotorRun = 0; 
         //glState = STOP;
+// stepp bug
+
         g_ucDir = LOW;
-        updateSteps();
+        updateSteps(4);
         if (giLoopCnt >= giMaxLoop) {
           glState = STOP;
           g_ucMotorRun = 0;
-          updateStatus(szStatus);
+          giLoopCnt = 0;
+          strcpy(szStatus,"Fertig");
+          updateStatusLine(szStatus);
         }
       } else if (giStepCnt >= giTargetPos) {
-        g_ucDir = HIGH;
-        updateSteps();
-        giLoopCnt++;
-        updateLoopCnt();
+
+        if (lDownTime == 0 ) {
+          // kam unten an
+          lDownTime = millis();
+          g_ucMotorRun = 0; 
+          giLoopCnt++;
+          updateLoopCnt();
+          strcpy(szStatus,"Wait  ");
+          updateStatusLine(szStatus);
+          updateSteps(5);
+        } 
       }
+    }
+  } else if (g_ucMotorEnable && !g_ucMotorRun && lDownTime) {
+long now = millis();
+    // hier gehts ums warten ...
+    if (lDownTime + DOWNDELAY <= now) {
+      g_ucMotorRun = 1; 
+      lDownTime = 0;
+      g_ucDir = HIGH;
+      strcpy(szStatus,"Run   ");
+      updateStatusLine(szStatus);
     }
   }
 
@@ -360,6 +445,7 @@ void loop()
   // pressure of 0 means no pressing!
 
   if (p.z > MINPRESSURE && p.z < MAXPRESSURE) {
+// Tastenauswertung
     int iX = 0;
     int iY = 0;
    
@@ -391,13 +477,20 @@ void loop()
         (iY > FIRSTBUTTON_Y) && (iY < (FIRSTBUTTON_Y + BUTTONSIZE_Y)) ) {
       strcpy(szStatus,"Home  ");
       glState = HOMING;
-      updateStatus(szStatus);
+      updateStatusLine(szStatus);
       g_ucMotorRun = 1;
     } else if ((iX > (FIRSTBUTTON_X + BUTTONDIST_X) ) &&
                (iX < (FIRSTBUTTON_X + BUTTONSIZE_X + BUTTONDIST_X)) &&
                (iY > FIRSTBUTTON_Y) &&
                (iY < (FIRSTBUTTON_Y + BUTTONSIZE_Y)) ) {
-      strcpy(szStatus,"Fast");
+
+      glState = STOP;
+      lDownTime = 0;
+      g_ucMotorRun = 0;
+      strcpy(szStatus,"Pause ");
+      updateStatusLine(szStatus);
+
+/*
       if (myTimeout != 0) {
          myTimeout = 0;
       } else {
@@ -405,13 +498,14 @@ void loop()
       }
       Serial.print("myTimeout: ");
       Serial.println(myTimeout);
+*/
     } else if ((iX > FIRSTBUTTON_X) && (iX < (FIRSTBUTTON_X + BUTTONSIZE_X)) &&
                (iY > (FIRSTBUTTON_Y + BUTTONDIST_Y) ) &&
                (iY < (FIRSTBUTTON_Y + BUTTONSIZE_Y + BUTTONDIST_Y)) ) {
       if (glState != HOME) {
         strcpy(szStatus,"Up      ");
         if (glState != UP) {
-          updateStatus(szStatus);
+          updateStatusLine(szStatus);
         }
         glState = UP;
         g_ucDir = HIGH;
@@ -423,7 +517,7 @@ void loop()
                (iY < (FIRSTBUTTON_Y + BUTTONSIZE_Y + BUTTONDIST_Y)) ) {
       strcpy(szStatus,"Down  ");
       if (glState != DOWN) {
-        updateStatus(szStatus);
+        updateStatusLine(szStatus);
       }
       g_ucMotorRun = 1;
       g_ucDir = LOW;
@@ -437,7 +531,9 @@ void loop()
       Serial.print("giHubSteps ");
       Serial.println(giHubSteps);
 
+      updateLoopCnt();
 
+// hier ist noch ein Bug
       if (giStepCnt < HUBSTEPS) {
         giHubSteps = giStepCnt - 10;
       } else {
@@ -446,7 +542,7 @@ void loop()
 
       if (glState != RUN) {
         strcpy(szStatus,"Start ");
-        updateStatus(szStatus);
+        updateStatusLine(szStatus);
         g_ucDir = HIGH;
         glState = RUN;
         g_ucMotorRun = 1;
@@ -457,8 +553,12 @@ void loop()
                (iY < (FIRSTBUTTON_Y + (BUTTONSIZE_Y*2) + BUTTONDIST_Y)) ) {
       strcpy(szStatus,"Stop  ");
       glState = STOP;
+      lDownTime = 0;
       g_ucMotorRun = 0;
-      updateStatus(szStatus);
+      giLoopCnt = 0;
+      giMaxLoop = 1;
+      updateMaxLoop();
+      updateStatusLine(szStatus);
     } else if ((iX > FIRSTBUTTON_X) && (iX < (FIRSTBUTTON_X + BUTTONSIZE_X)) &&
                (iY > (FIRSTBUTTON_Y + (BUTTONDIST_Y*3)) ) &&
                (iY < (FIRSTBUTTON_Y + (BUTTONSIZE_Y*3) + BUTTONDIST_Y)) ) {
@@ -466,17 +566,31 @@ void loop()
       giTargetPos = giStepCnt;
       giLoopCnt = 0;
       glState = STOP;
+      lDownTime = 0;
       g_ucMotorRun = 0;
       Serial.print("Position Saved ");
       Serial.println(giStepCnt);
-      updateSteps();
+      updateSteps(6);
       updateLoopCnt();
-      updateStatus(szStatus);
+      updateTargetPos();
+      updateStatusLine(szStatus);
     } else if ((iX > (FIRSTBUTTON_X + BUTTONDIST_X) ) &&
                (iX < (FIRSTBUTTON_X + BUTTONSIZE_X + BUTTONDIST_X)) &&
                (iY > (FIRSTBUTTON_Y + (BUTTONDIST_Y*3)) ) &&
                (iY < (FIRSTBUTTON_Y + (BUTTONSIZE_Y*3) + BUTTONDIST_Y)) ) {
-      strcpy(szStatus,"Leer2");
+
+      if (giMaxLoop < 10) {
+        giMaxLoop = 10;
+      } else {
+        giMaxLoop += 10;
+      }
+
+      Serial.print("Count ++");
+      Serial.println(giMaxLoop);
+
+      strcpy(szStatus,"Count++");
+      updateStatusLine(szStatus);
+      updateMaxLoop();
     } else {
       strcpy(szStatus,"");
     }
@@ -494,9 +608,10 @@ void loop()
     // touch gedrueckt 
   } else {
     if ((glState == UP) || (glState == DOWN)) {
-      //updateSteps();
+      //updateSteps(7);
       g_ucMotorRun = 0;
       glState = STOP;
+      lDownTime = 0;
     }
   }
 
